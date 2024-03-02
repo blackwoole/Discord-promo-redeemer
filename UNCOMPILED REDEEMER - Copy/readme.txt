@@ -37,3 +37,9 @@ Note ->
 
 Contribute ->
 as i didnt care about my profit and wanted to make you guys happy ill appriciate your donation -> LTC - LbcMdY2Wok92sGS4eM1gELXPXDduYuKfzH
+
+Formats ->
+token formats ->
+email:pass:token or token only
+Vcc format ->
+ccn:expmonthexpyear:cvv
