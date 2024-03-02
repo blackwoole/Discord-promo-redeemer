@@ -1,0 +1,16 @@
+{
+    "promoType": "3m",
+    "cardName": "Mehmet Ergin",
+    "line_1": "71 Glouscter road",
+    "city": "Cliaiau-aaron",
+    "state": "Cliaiau-aaron",
+    "postalcode": "SA48 2RP ",
+    "use-inbuilt-promo-gen": "off",
+    "webhookurl": "https://discord.com/api/webhooks/1212084310983581746/I1JDp8HGBzWtMe-_fZeum3Y6fSv6egYynrmZoovunEWlyJgpeIFNuNEDvLh0MXjJiyhY",
+    "country": "GB",
+    "proxySupport": "off",
+    "custom-branding": {
+        "custom-branding": "on",
+        "displayName": ".gg/ncert"
+    }
+}
