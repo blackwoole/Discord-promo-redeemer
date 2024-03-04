@@ -1,5 +1,5 @@
+4th March, 2024, Monday - inbuilt promo gen patched!
 4th March, 2024, Monday - New update includes -> capsolver support, less flags + improved spoofing + working vcc remover with updated promo generator
-
 Hello, response there.
 this is a program that automates the redemption of 1m and 3m promos in 15 or less seconds.
 
