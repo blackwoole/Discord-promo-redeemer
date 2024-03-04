@@ -16,6 +16,8 @@ from traceback import print_exc
 from random import choice
 lock = Lock()
 import tls_client
+import capsolver
+import secrets
 import requests
 sT = tls_client.Session(
     ja3_string="771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0",
@@ -104,38 +106,6 @@ import time
 import sys
 init()
 message_id = None
-def gen():
-        response = sT.post('https://api.discord.gx.games/v1/direct-fulfillment', json={
-            'partnerUserId': str(uuid.uuid4()),
-        },
-        headers={
-    'authority': 'api.discord.gx.games',
-    'accept': '*/*',
-    'accept-language': 'en-US,en;q=0.9',
-    'content-type': 'application/json',
-    'origin': 'https://www.opera.com',
-    'referer': 'https://www.opera.com/',
-    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Opera GX";v="106"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"',
-    'sec-fetch-dest': 'empty',
-    'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'cross-site',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0',
-})
-        if response.status_code == 429:
-            return 'failed'
-        if "Gateway Time-out" in response.text:
-            return 'failed'
-        if "502 Bad Gateway" in response.text:
-            return 'failed'
-        try: 
-            ptoken = response.json()['token']
-        except:
-            open('diag.txt','w').write(response.text)
-            return 'failed'
-        link = f"https://discord.com/billing/partner-promotions/1180231712274387115/{ptoken}"
-        return link
 claimed = 0
 failed = 0
 processed = 0
@@ -179,13 +149,126 @@ try:
   state = config["state"]
   postalcode = config["postalcode"]
   country = config["country"]
-  ipg = config["use-inbuilt-promo-gen"]
+  ipg = config["inbuilt-promo-gen"]["use-inbuilt-promo-gen"]
+  kipg = config["inbuilt-promo-gen"]["capsolverkey"]
   wurl = config["webhookurl"]
-  proa = config["proxySupport"]
+  sj = config["proxySupport"]
   isOn = config["custom-branding"]["custom-branding"]
   dName = config["custom-branding"]["displayName"]
+  cIsOn = config["capsolver-support"]["usecapsolver"]
+  cKey = config["capsolver-support"]["key"]
 except:
    Eprint("ERROR OCCURED FETCHING DATAS FROM config.json!")
+# https://github.com/notlit69/OperaGX-Promo-Gen/blob/main/main.py
+class Utils:
+    def get_soln() -> str|None:
+        try:
+            capsolver.api_key = kipg
+            soln = capsolver.solve({
+            "type": "ReCaptchaV2TaskProxyLess",
+            "websiteURL": "https://auth.opera.com/account/authenticate/email",
+            "websiteKey": "6LdYcFgaAAAAAEH3UnuL-_eZOsZc-32lGOyrqfA4",
+          })['gRecaptchaResponse']
+            return soln
+        except Exception as e:
+            Logger.Sprint("ERROR",f"Captcha Error: {str(e)}",Fore.RED)
+            return None
+
+class Logger:
+    @staticmethod
+    def Sprint(tag: str, content: str, color) -> None:
+        ts = f"{Fore.RESET}{Fore.LIGHTBLACK_EX}{datetime.now().strftime('%H:%M:%S')}{Fore.RESET}"
+        with lock:
+            print(f"{Style.BRIGHT}{ts}{color} [{tag}] {Fore.RESET}{content}{Fore.RESET}")
+    @staticmethod
+    def Ask(tag: str, content: str, color):
+        ts = f"{Fore.RESET}{Fore.LIGHTBLACK_EX}{datetime.now().strftime('%H:%M:%S')}{Fore.RESET}"
+        return input(f"{Style.BRIGHT}{ts}{color} [{tag}] {Fore.RESET}{content}{Fore.RESET}")
+
+class Opera:
+    def __init__(self) -> None:
+        self.session = requests.Session()
+        self.session.proxies = None
+        self.user = secrets.token_hex(10)
+        self.email = f"{self.user}@"+choice(['gmail.com','outlook.com','yahoo.com','hotmail.com'])
+        self.user_agent = secrets.token_hex(10) # fire user agent 
+        self.session.headers={
+    'user-agent': self.user_agent,
+}
+    def exec_request(self,*args,**kwargs) -> requests.Response:
+        for x in range(50):
+            try:
+                return self.session.request(*args,**kwargs)
+            except:
+                # print_exc()
+                continue
+        else:
+            raise Exception("Failed To Execute Request After 50x Retries!")
+    def post_request(self, *args, **kwargs) -> requests.Response:
+        return self.exec_request("POST",*args,**kwargs)
+    def get_request(self, *args, **kwargs) -> requests.Response:
+        return self.exec_request("GET",*args,**kwargs)
+
+    def regAndAuth(self) -> bool:
+        self.get_request("https://auth.opera.com/account/authenticate",allow_redirects=True)
+        start = time.time()
+        soln = Utils.get_soln() 
+        if not soln:
+            return False
+        self.session.headers['x-language-locale'] = 'en'
+        self.session.headers['referer'] = 'https://auth.opera.com/account/authenticate/signup'
+        signUp = self.post_request("https://auth.opera.com/account/v4/api/signup",json={
+    'email': self.email,
+    'password': self.user,
+    'password_repeated': self.user,
+    'marketing_consent': False,
+    'captcha' : soln,
+    'services': ['gmx']})
+        if "429" in signUp.text:
+            return False
+        if not signUp.status_code in [200,201,204]:
+            return False
+        self.session.headers['x-csrftoken'] = self.session.cookies.get_dict()['__Host-csrftoken']
+        profile = self.exec_request("PATCH","https://auth.opera.com/api/v1/profile",json={"username":self.user})
+        if not profile.status_code in [200,201,204]:
+            return False
+        self.session.headers = {
+    'authority': 'api.gx.me',
+    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'accept-language': 'en-US,en;q=0.9',
+    'referer': 'https://gx.me/signup/?utm_source=gxdiscord',
+    'sec-ch-ua': '"Not A(Brand";v="99", "Opera GX";v="107", "Chromium";v="121"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': 'same-site',
+    'upgrade-insecure-requests': '1',
+    'user-agent': self.user_agent,
+}
+        self.get_request("https://api.gx.me/session/login?site=gxme&target=%2F",allow_redirects=True)
+        self.get_request("https://auth.opera.com/account/login-redirect?service=gmx",allow_redirects=True)
+        return True
+        
+    def gen(self) -> None:
+        global genned
+        for x in range(3):
+            if not self.regAndAuth():
+                continue
+            break
+        else:
+            return 
+        auth = self.get_request("https://api.gx.me/profile/token").json()['data']
+        promoReq = self.post_request('https://discord.opr.gg/v2/direct-fulfillment', headers={
+    'authorization': auth,
+    'origin': 'https://www.opera.com',
+    'referer': 'https://www.opera.com/',
+    'user-agent': self.user_agent,
+})
+        if not "token" in promoReq.text or not promoReq.ok:
+            return 
+        promo = "https://discord.com/billing/partner-promotions/1180231712274387115/{}".format(promoReq.json()['token'])
+        return promo
 class REDEEMER:
     def __init__(self, token: str, full_vcc: str, promoCode: str, proxy: str):
         global processed, failed, claimed
@@ -207,10 +290,35 @@ class REDEEMER:
         self.promoz = promoCode
         processed += 1
         if proxy:
-          self.proxy = {'http': f"http://{proxy}", 'https': f"http://{proxy}"}
+          self.proxy = f"http://{proxy}"
         else:
            self.proxy = None
         set_console_title()
+
+    def getSubscriptionId(self):
+      headers = {
+    'authority': 'discord.com',
+    'accept': '*/*',
+    'accept-language': 'en-US,en;q=0.9',
+    'authorization': self.token,
+    # 'cookie': '__dcfduid=2458d570da0411eebe6e354350a588c5; __sdcfduid=2458d571da0411eebe6e354350a588c58c7f5333f935f0f6e60c1a8386bdce9405c5aa8e37c55b9a6385f47732eaa85e; cf_clearance=a17CnElp_nM_3yPQeCVxaPPjQqYYA3ydWXzNzEwTykg-1709542184-1.0.1.1-Kgl9FfTqIhM.6bndxRc4KPLJJrAWgOjWR0D6hV1OY8I30UWwxB9kvV0u1EOFmWk4nOiWdrUuwdBi4hixq9rYPA; __cfruid=146c0694d5ebabc9674c27044a63c08a487c6c12-1709546676; _cfuvid=g1Dl3Gb2egXVZcEPihhQ8pu20G2w2c2kFtx.TPo72oc-1709546676264-0.0.1.1-604800000',
+    'referer': 'https://discord.com/channels/@me',
+    'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Microsoft Edge";v="122"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
+    'x-debug-options': 'bugReporterEnabled',
+    'x-discord-locale': 'en-US',
+    'x-discord-timezone': 'Europe/Budapest',
+    'x-super-properties': 'eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImVuLVVTIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEyMi4wLjAuMCBTYWZhcmkvNTM3LjM2IEVkZy8xMjIuMC4wLjAiLCJicm93c2VyX3ZlcnNpb24iOiIxMjIuMC4wLjAiLCJvc192ZXJzaW9uIjoiMTAiLCJyZWZlcnJlciI6IiIsInJlZmVycmluZ19kb21haW4iOiIiLCJyZWZlcnJlcl9jdXJyZW50IjoiIiwicmVmZXJyaW5nX2RvbWFpbl9jdXJyZW50IjoiIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6MjcxMjE2LCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==',
+}
+      response = sT.get('https://discord.com/api/v9/users/@me/billing/subscriptions', headers=headers)
+      json_data = response.json()
+      return json_data[0]["id"]
+     
     def GetPromoCode(self):
        headerz = {
     'authority': 'discord.com',
@@ -257,6 +365,18 @@ class REDEEMER:
           with open('database/promoFailedFetchCode.txt', 'a') as fas:
                 fas.write(f"{self.promoz}\n")
           return 'F'
+    def get_soln(self) -> str|None:
+        try:
+            capsolver.api_key = cKey
+            soln = capsolver.solve({
+            "type": "HCaptchaTaskProxyLess",
+            "websiteURL": "https://discord.com/",
+            "websiteKey": "472b4c9f-f2b7-4382-8135-c983f5496eb9",
+          })['gRecaptchaResponse']
+            return soln
+        except Exception as e:
+            Eprint(f"{Fore.LIGHTRED_EX}[ERROR] {Fore.LIGHTMAGENTA_EX}- {Fore.LIGHTCYAN_EX}Error Solving Captcha [{Fore.LIGHTMAGENTA_EX}CAPSOLVER{Fore.LIGHTCYAN_EX}], EXC -> {Fore.LIGHTMAGENTA_EX}{e}")
+            return None
     def cancle_subscription(self,subsid):
         headers = {
     'authority': 'discord.com',
@@ -291,7 +411,7 @@ class REDEEMER:
         'premium subscription cancellation modal',
     ],
 }
-        response = requests.patch(
+        response = sT.patch(
     f'https://discord.com/api/v9/users/@me/billing/subscriptions/{subsid}',
     params=params,
     headers=headers,
@@ -409,7 +529,8 @@ class REDEEMER:
              st.write(f"{self.token}\n")
           with open('outputSuccess/successVcc.txt', 'a') as sv:
              sv.write(f"{self.ccn}:{self.expM}:{self.expY}:{self.cvv}\n")
-          ale = self.cancle_subscription(ase)
+          subid = self.getSubscriptionId()
+          ale = self.cancle_subscription(subid)
           rr = self.removeCard(id)
           if rr == 'S':
              return ''
@@ -451,7 +572,7 @@ class REDEEMER:
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
 }
        data = f'card[number]={self.ccn}&card[cvc]={self.cvv}&card[exp_month]={self.expM}&card[exp_year]={self.expY}&guid={uuid.uuid4()}&muid={uuid.uuid4()}&sid={uuid.uuid4}&payment_user_agent=stripe.js%2F28b7ba8f85%3B+stripe-js-v3%2F28b7ba8f85%3B+split-card-element&referrer=https%3A%2F%2Fdiscord.com&time_on_page=415638&key=pk_live_CUQtlpQUF0vufWpnpUmQvcdi&pasted_fields=number%2Ccvc'
-       response = requests.post('https://api.stripe.com/v1/tokens', proxies=self.proxy, headers=header1, data=data)
+       response = sT.post('https://api.stripe.com/v1/tokens', proxy=self.proxy, headers=header1, data=data)
        try:
           TokenCard = response.json()["id"]
        except Exception as e:
@@ -489,7 +610,7 @@ class REDEEMER:
     'x-discord-timezone': 'Europe/Budapest',
     'x-super-properties': 'eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImVuLVVTIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEyMi4wLjAuMCBTYWZhcmkvNTM3LjM2IEVkZy8xMjIuMC4wLjAiLCJicm93c2VyX3ZlcnNpb24iOiIxMjIuMC4wLjAiLCJvc192ZXJzaW9uIjoiMTAiLCJyZWZlcnJlciI6IiIsInJlZmVycmluZ19kb21haW4iOiIiLCJyZWZlcnJlcl9jdXJyZW50IjoiIiwicmVmZXJyaW5nX2RvbWFpbl9jdXJyZW50IjoiIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6MjY4NjAwLCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==',
 }
-       response = requests.post('https://discord.com/api/v9/users/@me/billing/stripe/setup-intents', headers=header2, proxies=self.proxy)
+       response = sT.post('https://discord.com/api/v9/users/@me/billing/stripe/setup-intents', headers=header2, proxy=self.proxy)
        try:
           csTok = response.json()["client_secret"]
           Stok = str(csTok).split('_secret_')[0]
@@ -541,10 +662,10 @@ class REDEEMER:
         'email': '',
     },
 }
-       response = requests.post(
+       response = sT.post(
     'https://discord.com/api/v9/users/@me/billing/payment-sources/validate-billing-address',
     headers=header3,
-    json=jsonD, proxies=self.proxy
+    json=jsonD, proxy=self.proxy
 )
        try:
           BTok = response.json()["token"]
@@ -580,10 +701,10 @@ class REDEEMER:
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
 }
        data = f'payment_method_data[type]=card&payment_method_data[card][token]={TokenCard}&payment_method_data[billing_details][address][line1]={line_1}&payment_method_data[billing_details][address][line2]=&payment_method_data[billing_details][address][city]={city}&payment_method_data[billing_details][address][state]={state}&payment_method_data[billing_details][address][postal_code]={postalcode}&payment_method_data[billing_details][address][country]={country}&payment_method_data[billing_details][name]={cardName}&payment_method_data[guid]={uuid.uuid4()}&payment_method_data[muid]={uuid.uuid4()}&payment_method_data[sid]={uuid.uuid4()}&payment_method_data[payment_user_agent]=stripe.js%2F28b7ba8f85%3B+stripe-js-v3%2F28b7ba8f85&payment_method_data[referrer]=https%3A%2F%2Fdiscord.com&payment_method_data[time_on_page]=707159&expected_payment_method_type=card&use_stripe_sdk=true&key=pk_live_CUQtlpQUF0vufWpnpUmQvcdi&client_secret={csTok}'
-       response = requests.post(
+       response = sT.post(
     f'https://api.stripe.com/v1/setup_intents/{Stok}/confirm',
     headers=header4,
-    data=data, proxies=self.proxy
+    data=data, proxy=self.proxy
 )
        try:
           CardSCMAIN = response.json()["id"]
@@ -637,7 +758,7 @@ class REDEEMER:
         'country': country,
         'email': '',
     },
-    'billing_address_token': BTok,
+    'billing_address_token': BTok
 }
        response = sT.post(
     'https://discord.com/api/v9/users/@me/billing/payment-sources',
@@ -651,6 +772,57 @@ class REDEEMER:
        except Exception as e:
           if 'captcha_key' in str(response.json()):
             Eprint(f'{Fore.LIGHTRED_EX}[ERROR] {Fore.LIGHTMAGENTA_EX}- {Fore.LIGHTCYAN_EX}Failed Adding Card {Fore.YELLOW}(Captcha-Detected)')
+            if cIsOn == 'yes':
+               c = self.get_soln()
+               header6 ={ 
+    'authority': 'discord.com',
+    'accept': '*/*',
+    'accept-language': 'en-US,en;q=0.9',
+    'authorization': self.token,
+    'content-type': 'application/json',
+    'origin': 'https://discord.com',
+    'referer': 'https://discord.com/channels/@me',
+    'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Microsoft Edge";v="122"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
+    'x-captcha-key': c,
+    'x-captcha-rqtoken': str(response.json()["captcha_rqdata"]),
+    'x-debug-options': 'bugReporterEnabled',
+    'x-discord-locale': 'en-US',
+    'x-discord-timezone': 'Europe/Budapest',
+    'x-super-properties': 'eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImVuLVVTIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEyMi4wLjAuMCBTYWZhcmkvNTM3LjM2IEVkZy8xMjIuMC4wLjAiLCJicm93c2VyX3ZlcnNpb24iOiIxMjIuMC4wLjAiLCJvc192ZXJzaW9uIjoiMTAiLCJyZWZlcnJlciI6IiIsInJlZmVycmluZ19kb21haW4iOiIiLCJyZWZlcnJlcl9jdXJyZW50IjoiIiwicmVmZXJyaW5nX2RvbWFpbl9jdXJyZW50IjoiIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6MjY4NjAwLCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==',
+               }
+               p2 = {
+    'payment_gateway': 1,
+    'token': pmTok,
+    'billing_address': {
+        'name': cardName,
+        'line_1': line_1,
+        'line_2': None,
+        'city': city,
+        'state': state,
+        'postal_code': postalcode,
+        'country': country,
+        'email': '',
+    },
+    'billing_address_token': BTok
+}
+               responsea = sT.post(
+    'https://discord.com/api/v9/users/@me/billing/payment-sources',
+    headers=header6,
+    json=p2
+)
+               if responsea.status_code == 200:
+                  Iprint()
+               else:
+                  Eprint(f'{Fore.LIGHTRED_EX}[ERROR] {Fore.LIGHTMAGENTA_EX}- {Fore.LIGHTCYAN_EX}Failed Solving Posting Captcha Key In Discord API Header')
+            else:
+               pass
+               
             with open('database/captchaTokens.txt', 'a') as es:
                es.write(f"{self.token} -> Captcha Required.\n")
           else:
@@ -695,7 +867,7 @@ def nameChanger(token: str, dName: str):
     'global_name': str(dName),
 }
 
-    response = requests.patch('https://discord.com/api/v9/users/@me', headers=headers, json=json_data)
+    response = sT.patch('https://discord.com/api/v9/users/@me', headers=headers, json=json_data)
     if response.status_code == 200:
         return
     else:
@@ -723,7 +895,7 @@ def main():
     num_threads = int(input(f"{Fore.LIGHTWHITE_EX}[{Fore.LIGHTBLACK_EX}{format_current_time()}{Fore.LIGHTWHITE_EX}]  {Fore.LIGHTWHITE_EX}[{Fore.LIGHTMAGENTA_EX}?{Fore.LIGHTWHITE_EX}] {Fore.LIGHTCYAN_EX} Enter the number of threads: "))
     os.system('cls')
 
-    proxies = fetch_proxies() if ipg == 'on' else [None] * num_threads
+    proxies = fetch_proxies() if sj == 'on' else [None] * num_threads
 
     with open('input/tokens.txt') as f_tokens, \
             open('input/vccs.txt') as f_vccs, \
@@ -744,7 +916,7 @@ def main():
             vcc = lines_vccs[i % len(lines_vccs)].strip()
 
             if ipg == 'on':
-                promo = gen()
+                promo = Opera().gen()
             else:
                 promo = lines_promos[i % len(lines_promos)].strip()
 
@@ -761,9 +933,9 @@ def main():
                     thread.join()
                 threads = []
 
-                # Call nameChanger function with dName constant
                 for token in lines_tokens:
                     nameChanger(token.strip(), dName.strip())
+
 if __name__ == "__main__":
     main()
     Cprint(Fore.LIGHTBLUE_EX, '@', f'{Fore.LIGHTMAGENTA_EX}[INFO] {Fore.LIGHTMAGENTA_EX} - {Fore.LIGHTCYAN_EX}Materials completed, Claimed={claimed}, Failed={failed}, Processed={processed}.')
